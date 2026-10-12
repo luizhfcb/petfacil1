@@ -1,5 +1,3 @@
-// Espelha as regras do app (src/utils/validators.ts) para que front e back validem igual.
-
 function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
 }

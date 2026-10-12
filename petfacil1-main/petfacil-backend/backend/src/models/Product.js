@@ -9,7 +9,6 @@ const productSchema = new mongoose.Schema(
     promotionalPrice: { type: Number, required: true, min: 0 },
     type: { type: String, required: true, enum: PRODUCT_TYPES },
     description: { type: String, required: true },
-    // Mantido como texto, igual ao app (ex.: "30/06/2027" ou "Não se aplica")
     expirationDate: { type: String, required: true },
   },
   { timestamps: true }

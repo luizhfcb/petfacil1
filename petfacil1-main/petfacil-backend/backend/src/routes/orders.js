@@ -9,8 +9,6 @@ router.use(requireAuth);
 
 const round2 = (value) => Math.round(value * 100) / 100;
 
-// POST /api/orders   (botão "Finalizar pedido" do carrinho)
-// body: { items: [{ productId, quantity? }] }  -> o carrinho do app é uma lista de produtos
 router.post('/', async (req, res, next) => {
   try {
     const { items } = req.body;
@@ -30,7 +28,6 @@ router.post('/', async (req, res, next) => {
       }
       const quantity = Number.isInteger(item.quantity) && item.quantity > 0 ? item.quantity : 1;
       for (let i = 0; i < quantity; i += 1) {
-        // O preço vem sempre do banco (promocional), nunca do cliente
         orderItems.push({ product: product._id, productName: product.name, price: product.promotionalPrice });
       }
     }
@@ -43,14 +40,12 @@ router.post('/', async (req, res, next) => {
       total,
     });
 
-    // Mesmo formato que a tela OrderSuccess espera: { itemCount, total }
     res.status(201).json({ itemCount: order.itemCount, total: order.total, order });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/orders   (histórico de compras do usuário)
 router.get('/', async (req, res, next) => {
   try {
     const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
@@ -60,7 +55,6 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /api/orders/:id
 router.get('/:id', async (req, res, next) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, user: req.user._id });

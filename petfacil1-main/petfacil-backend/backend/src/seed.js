@@ -27,7 +27,7 @@ async function seed() {
   console.log(`${products.length} produtos prontos`);
 
   if (!(await User.exists({ login: demoUser.login }))) {
-    await User.create(demoUser); // senha é criptografada pelo model
+    await User.create(demoUser);
     console.log(`Usuário demo criado: ${demoUser.login} / ${demoUser.password}`);
   }
 

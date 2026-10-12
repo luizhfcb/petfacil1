@@ -7,7 +7,6 @@ function escapeRegex(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// GET /api/products?search=ração&type=Brinquedo   (tela de catálogo: busca + categorias)
 router.get('/', async (req, res, next) => {
   try {
     const { search, type } = req.query;
@@ -26,7 +25,6 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /api/products/:id   (tela de detalhe)
 router.get('/:id', async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);

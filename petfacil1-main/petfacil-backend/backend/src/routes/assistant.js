@@ -16,7 +16,6 @@ function getAnswer(question) {
   return answers.find(({ terms }) => terms.some((term) => normalized.includes(term)))?.answer ?? fallback;
 }
 
-// POST /api/assistant   body: { question }
 router.post('/', (req, res) => {
   const { question } = req.body;
   if (!question || !String(question).trim()) {

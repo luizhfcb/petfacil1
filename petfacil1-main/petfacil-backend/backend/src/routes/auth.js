@@ -12,7 +12,6 @@ function signToken(user) {
   });
 }
 
-// POST /api/auth/register  (tela "Criar conta")
 router.post('/register', async (req, res, next) => {
   try {
     const { fullName, email, cpf, password, passwordConfirmation } = req.body;
@@ -46,7 +45,6 @@ router.post('/register', async (req, res, next) => {
   }
 });
 
-// POST /api/auth/login  (tela "Entrar")
 router.post('/login', async (req, res, next) => {
   try {
     const { login, email, password } = req.body;
@@ -67,7 +65,6 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-// GET /api/auth/me  (dados do usuário logado)
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });

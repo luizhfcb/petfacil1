@@ -4,7 +4,6 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema(
   {
     fullName: { type: String, required: true, trim: true, minlength: 2 },
-    // "login" no app = e-mail
     login: { type: String, required: true, unique: true, lowercase: true, trim: true },
     cpf: { type: String, required: true, unique: true, match: /^\d{11}$/ },
     password: { type: String, required: true, select: false },

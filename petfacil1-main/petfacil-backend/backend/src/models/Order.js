@@ -1,7 +1,5 @@
 const mongoose = require('mongoose');
 
-// Cada item guarda um "retrato" do produto no momento da compra (nome e preço),
-// assim o histórico não muda se o catálogo for atualizado depois.
 const orderItemSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
@@ -17,7 +15,6 @@ const orderSchema = new mongoose.Schema(
     items: { type: [orderItemSchema], validate: (v) => v.length > 0 },
     itemCount: { type: Number, required: true },
     total: { type: Number, required: true },
-    // Pagamento no caixa, na retirada (como no app)
     paymentMethod: { type: String, default: 'Retirada na loja' },
     status: { type: String, enum: ['Registrado', 'Pronto para retirada', 'Retirado', 'Cancelado'], default: 'Registrado' },
   },
