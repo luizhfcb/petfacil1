@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { api } from '../services/api';
 import { colors, fonts, radius, shadow } from '../theme';
 
 type Message = { from: 'bot' | 'user'; text: string };
@@ -25,11 +26,18 @@ export function Assistant() {
     { from: 'bot', text: 'Oi! Sou a Fifi. O que você quer saber sobre os produtos ou seu pedido?' },
   ]);
 
-  const send = (text = input) => {
+  const send = async (text = input) => {
     const question = text.trim();
     if (!question) return;
-    setMessages((current) => [...current, { from: 'user', text: question }, { from: 'bot', text: getAnswer(question) }]);
+    setMessages((current) => [...current, { from: 'user', text: question }]);
     setInput('');
+    let answer: string;
+    try {
+      answer = await api.ask(question);
+    } catch {
+      answer = getAnswer(question);
+    }
+    setMessages((current) => [...current, { from: 'bot', text: answer }]);
   };
 
   return (

@@ -1,72 +1,77 @@
 import { createContext, PropsWithChildren, useContext, useMemo, useState } from 'react';
-import { Product, Purchase, User } from '../types';
+import { api, ApiError } from '../services/api';
+import { RegisterInput } from '../services/apiClient';
+import { Product, User } from '../types';
+
+type Result = { ok: true } | { ok: false; message: string };
+type OrderOutcome = { ok: true; itemCount: number; total: number } | { ok: false; message: string };
 
 type AppContextValue = {
   currentUser: User | null;
   cart: Product[];
-  purchases: Purchase[];
-  signUp: (user: User) => { ok: boolean; message?: string };
-  signIn: (login: string, password: string) => { ok: boolean; message?: string };
+  signUp: (input: RegisterInput) => Promise<Result>;
+  signIn: (login: string, password: string) => Promise<Result>;
   signOut: () => void;
   addToCart: (product: Product) => void;
   removeFromCart: (index: number) => void;
-  finishOrder: () => { itemCount: number; total: number };
-};
-
-const demoUser: User = {
-  fullName: 'Tutor PetFacil',
-  cpf: '52998224725',
-  login: 'tutor@petfacil.com',
-  password: 'pet123',
+  finishOrder: () => Promise<OrderOutcome>;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError) {
+    const firstFieldError = error.errors ? Object.values(error.errors)[0] : undefined;
+    return firstFieldError ?? error.message;
+  }
+  return fallback;
+}
+
 export function AppProvider({ children }: PropsWithChildren) {
-  const [users, setUsers] = useState<User[]>([demoUser]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [cart, setCart] = useState<Product[]>([]);
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
 
-  const value = useMemo<AppContextValue>(() => ({
-    currentUser,
-    cart,
-    purchases,
-    signUp: (user) => {
-      if (users.some((registered) => registered.cpf === user.cpf || registered.login.toLowerCase() === user.login.toLowerCase())) {
-        return { ok: false, message: 'Já existe uma conta com este CPF ou e-mail.' };
-      }
-      setUsers((current) => [...current, user]);
-      return { ok: true };
-    },
-    signIn: (login, password) => {
-      const user = users.find((registered) => registered.login.toLowerCase() === login.trim().toLowerCase() && registered.password === password);
-      if (!user) return { ok: false, message: 'E-mail ou senha não conferem.' };
-      setCurrentUser(user);
-      return { ok: true };
-    },
-    signOut: () => {
+  const value = useMemo<AppContextValue>(() => {
+    const signOut = () => {
+      api.setToken(null);
       setCurrentUser(null);
       setCart([]);
-    },
-    addToCart: (product) => setCart((current) => [...current, product]),
-    removeFromCart: (index) => setCart((current) => current.filter((_, itemIndex) => itemIndex !== index)),
-    finishOrder: () => {
-      const purchaseDate = new Date().toISOString();
-      const createdPurchases = cart.map((product) => ({
-        productName: product.name,
-        price: product.promotionalPrice,
-        purchaseDate,
-      }));
-      const result = {
-        itemCount: cart.length,
-        total: cart.reduce((sum, product) => sum + product.promotionalPrice, 0),
-      };
-      setPurchases((current) => [...current, ...createdPurchases]);
-      setCart([]);
-      return result;
-    },
-  }), [cart, currentUser, purchases, users]);
+    };
+
+    return {
+      currentUser,
+      cart,
+      signUp: async (input) => {
+        try {
+          await api.register(input);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, message: errorMessage(error, 'Não foi possível criar a conta.') };
+        }
+      },
+      signIn: async (login, password) => {
+        try {
+          setCurrentUser(await api.login(login.trim(), password));
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, message: errorMessage(error, 'Não foi possível entrar.') };
+        }
+      },
+      signOut,
+      addToCart: (product) => setCart((current) => [...current, product]),
+      removeFromCart: (index) => setCart((current) => current.filter((_, itemIndex) => itemIndex !== index)),
+      finishOrder: async () => {
+        try {
+          const result = await api.createOrder(cart);
+          setCart([]);
+          return { ok: true, ...result };
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) signOut();
+          return { ok: false, message: errorMessage(error, 'Não foi possível finalizar o pedido.') };
+        }
+      },
+    };
+  }, [cart, currentUser]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

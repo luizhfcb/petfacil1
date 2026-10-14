@@ -2,10 +2,10 @@ export type User = {
   fullName: string;
   cpf: string;
   login: string;
-  password: string;
 };
 
 export type Product = {
+  id: string;
   name: string;
   currentPrice: number;
   promotionalPrice: number;
@@ -14,9 +14,19 @@ export type Product = {
   expirationDate: string;
 };
 
-export type Purchase = {
+export type OrderItem = {
+  product: string;
   productName: string;
   price: number;
+};
+
+export type Order = {
+  id: string;
+  items: OrderItem[];
+  itemCount: number;
+  total: number;
+  status: string;
+  paymentMethod: string;
   purchaseDate: string;
 };
 
@@ -26,5 +36,6 @@ export type RootStackParamList = {
   Products: undefined;
   ProductDetail: { product: Product };
   Cart: undefined;
+  History: undefined;
   OrderSuccess: { itemCount: number; total: number };
 };

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppButton } from '../components/AppButton';
 import { Assistant } from '../components/Assistant';
@@ -15,10 +16,19 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Cart'>;
 export function CartScreen({ navigation }: Props) {
   const { cart, removeFromCart, finishOrder } = useApp();
   const total = cart.reduce((sum, product) => sum + product.promotionalPrice, 0);
-  const finish = () => {
-    if (!cart.length) return;
-    const result = finishOrder();
-    navigation.replace('OrderSuccess', result);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const finish = async () => {
+    if (!cart.length || loading) return;
+    setError('');
+    setLoading(true);
+    const result = await finishOrder();
+    if (!result.ok) {
+      setError(result.message);
+      setLoading(false);
+      return;
+    }
+    navigation.replace('OrderSuccess', { itemCount: result.itemCount, total: result.total });
   };
 
   return (
@@ -51,7 +61,8 @@ export function CartScreen({ navigation }: Props) {
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Pagamento</Text><Text style={styles.pickup}>No caixa, na retirada</Text></View>
             <View style={styles.rule} />
             <View style={styles.summaryRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{formatCurrency(total)}</Text></View>
-            <AppButton title="Finalizar pedido" onPress={finish} />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <AppButton title="Finalizar pedido" onPress={finish} loading={loading} />
           </View>
         )}
       </Screen>
@@ -83,6 +94,7 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   summaryLabel: { color: colors.muted, fontFamily: fonts.regular, fontSize: 14 },
   summaryValue: { color: colors.ink, fontFamily: fonts.semibold, fontSize: 15 },
+  error: { color: colors.danger, fontFamily: fonts.regular, fontSize: 13 },
   pickup: { color: colors.cobalt, fontFamily: fonts.semibold, fontSize: 13 },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: 2 },
   totalLabel: { color: colors.ink, fontFamily: fonts.display, fontSize: 20 },

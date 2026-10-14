@@ -18,17 +18,21 @@ export function SignUpScreen({ navigation }: Props) {
   const [fields, setFields] = useState(initialFields);
   const [touched, setTouched] = useState<Partial<Record<keyof SignUpFields, boolean>>>({});
   const [submitError, setSubmitError] = useState('');
+  const [loading, setLoading] = useState(false);
   const errors = useMemo(() => validateSignUp(fields), [fields]);
   const isValid = Object.keys(errors).length === 0;
   const update = (field: keyof SignUpFields, value: string) => setFields((current) => ({ ...current, [field]: value }));
   const errorFor = (field: keyof SignUpFields) => touched[field] ? errors[field] : undefined;
 
-  const submit = () => {
+  const submit = async () => {
     setTouched({ fullName: true, email: true, cpf: true, password: true, passwordConfirmation: true });
     if (!isValid) return;
-    const result = signUp({ fullName: fields.fullName.trim(), cpf: onlyDigits(fields.cpf), login: fields.email.trim(), password: fields.password });
+    setSubmitError('');
+    setLoading(true);
+    const result = await signUp({ ...fields, fullName: fields.fullName.trim(), email: fields.email.trim(), cpf: onlyDigits(fields.cpf) });
+    setLoading(false);
     if (!result.ok) {
-      setSubmitError(result.message ?? 'Não foi possível criar a conta.');
+      setSubmitError(result.message);
       return;
     }
     navigation.goBack();
@@ -48,7 +52,7 @@ export function SignUpScreen({ navigation }: Props) {
         <AppInput label="Senha" value={fields.password} onChangeText={(value) => update('password', value)} onBlur={() => setTouched((current) => ({ ...current, password: true }))} error={errorFor('password')} secureTextEntry placeholder="Crie uma senha" />
         <AppInput label="Repetir senha" value={fields.passwordConfirmation} onChangeText={(value) => update('passwordConfirmation', value)} onBlur={() => setTouched((current) => ({ ...current, passwordConfirmation: true }))} error={errorFor('passwordConfirmation')} secureTextEntry placeholder="Digite a mesma senha" />
         {submitError ? <Text style={styles.error}>{submitError}</Text> : null}
-        <AppButton title="Criar conta" onPress={submit} disabled={!isValid} />
+        <AppButton title="Criar conta" onPress={submit} disabled={!isValid} loading={loading} />
       </View>
     </Screen>
   );

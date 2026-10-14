@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Assistant } from '../components/Assistant';
 import { ProductCard } from '../components/ProductCard';
 import { Screen } from '../components/Screen';
-import { products } from '../data/products';
 import { useApp } from '../contexts/AppContext';
+import { api, ApiError } from '../services/api';
 import { colors, fonts, radius } from '../theme';
 import { Product, RootStackParamList } from '../types';
 
@@ -14,14 +14,29 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Products'>;
 
 export function ProductsScreen({ navigation }: Props) {
   const { currentUser, cart, addToCart } = useApp();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Product['type'] | 'Todos'>('Todos');
   const categories: Array<Product['type'] | 'Todos'> = ['Todos', 'Ração', 'Brinquedo', 'Higiene', 'Acessório'];
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setProducts(await api.products());
+    } catch (error) {
+      setLoadError(error instanceof ApiError ? error.message : 'Não foi possível carregar os produtos.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void loadProducts(); }, [loadProducts]);
   const filteredProducts = useMemo(() => products.filter((product) => {
     const matchesCategory = category === 'Todos' || product.type === category;
     const query = search.trim().toLocaleLowerCase('pt-BR');
     return matchesCategory && (!query || `${product.name} ${product.type}`.toLocaleLowerCase('pt-BR').includes(query));
-  }), [category, search]);
+  }), [products, category, search]);
 
   return (
     <View style={styles.container}>
@@ -31,10 +46,15 @@ export function ProductsScreen({ navigation }: Props) {
             <Text style={styles.hello}>OLÁ, {currentUser?.fullName.split(' ')[0]?.toLocaleUpperCase('pt-BR') ?? 'TUTOR'}</Text>
             <Text style={styles.title}>O que seu pet precisa?</Text>
           </View>
-          <Pressable accessibilityLabel={`Abrir carrinho com ${cart.length} itens`} onPress={() => navigation.navigate('Cart')} style={styles.cartButton}>
-            <Ionicons name="bag-handle-outline" size={24} color={colors.ink} />
-            {cart.length > 0 ? <View style={styles.badge}><Text style={styles.badgeText}>{cart.length}</Text></View> : null}
-          </Pressable>
+          <View style={styles.actions}>
+            <Pressable accessibilityLabel="Ver histórico de pedidos" onPress={() => navigation.navigate('History')} style={styles.cartButton}>
+              <Ionicons name="receipt-outline" size={24} color={colors.ink} />
+            </Pressable>
+            <Pressable accessibilityLabel={`Abrir carrinho com ${cart.length} itens`} onPress={() => navigation.navigate('Cart')} style={styles.cartButton}>
+              <Ionicons name="bag-handle-outline" size={24} color={colors.ink} />
+              {cart.length > 0 ? <View style={styles.badge}><Text style={styles.badgeText}>{cart.length}</Text></View> : null}
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.passport}>
@@ -66,9 +86,16 @@ export function ProductsScreen({ navigation }: Props) {
         </View>
         <View style={styles.list}>
           {filteredProducts.map((product) => (
-            <ProductCard key={product.name} product={product} onOpen={() => navigation.navigate('ProductDetail', { product })} onAdd={() => addToCart(product)} />
+            <ProductCard key={product.id} product={product} onOpen={() => navigation.navigate('ProductDetail', { product })} onAdd={() => addToCart(product)} />
           ))}
-          {filteredProducts.length === 0 ? <Text style={styles.empty}>Nenhum produto encontrado. Tente outra busca.</Text> : null}
+          {loading ? <ActivityIndicator size="large" color={colors.cobalt} style={styles.loader} /> : null}
+          {loadError ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.empty}>{loadError}</Text>
+              <Pressable onPress={loadProducts} style={styles.retry}><Text style={styles.retryText}>Tentar de novo</Text></Pressable>
+            </View>
+          ) : null}
+          {!loading && !loadError && filteredProducts.length === 0 ? <Text style={styles.empty}>Nenhum produto encontrado. Tente outra busca.</Text> : null}
         </View>
       </Screen>
       <Assistant />
@@ -82,6 +109,7 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   hello: { color: colors.cobalt, fontFamily: fonts.bold, fontSize: 11, letterSpacing: 1.5 },
   title: { color: colors.ink, fontFamily: fonts.display, fontSize: 29, marginTop: 3 },
+  actions: { flexDirection: 'row', gap: 10 },
   cartButton: { width: 50, height: 50, borderRadius: 17, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', right: -4, top: -5, minWidth: 21, height: 21, paddingHorizontal: 5, borderRadius: 11, backgroundColor: colors.coral, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: colors.white, fontFamily: fonts.bold, fontSize: 11 },
@@ -105,5 +133,9 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.ink, fontFamily: fonts.display, fontSize: 22 },
   count: { color: colors.muted, fontFamily: fonts.regular, fontSize: 13 },
   list: { gap: 13 },
+  loader: { paddingVertical: 30 },
+  errorBox: { alignItems: 'center', gap: 4 },
+  retry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 18, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.cobalt },
+  retryText: { color: colors.cobalt, fontFamily: fonts.bold, fontSize: 14 },
   empty: { color: colors.muted, fontFamily: fonts.regular, fontSize: 15, textAlign: 'center', paddingVertical: 30 },
 });

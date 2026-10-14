@@ -7,3 +7,4 @@ web-build/
 tmp/
 output/pdf/
 scripts/build_presentation_guide.py
+.env

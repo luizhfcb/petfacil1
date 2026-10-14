@@ -24,6 +24,7 @@ export function OrderSuccessScreen({ route, navigation }: Props) {
         <View style={styles.notchLeft} /><View style={styles.notchRight} />
       </View>
       <AppButton title="Voltar ao catálogo" onPress={() => navigation.popTo('Products')} style={styles.button} />
+      <AppButton title="Ver meus pedidos" variant="secondary" onPress={() => navigation.replace('History')} style={styles.button} />
     </Screen>
   );
 }

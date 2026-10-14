@@ -16,14 +16,19 @@ export function LoginScreen({ navigation }: Props) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (!login.trim() || !password) {
       setError('Preencha e-mail e senha para continuar.');
       return;
     }
-    const result = signIn(login, password);
-    if (!result.ok) setError(result.message ?? 'Não foi possível entrar.');
+    setLoading(true);
+    const result = await signIn(login, password);
+    if (!result.ok) {
+      setError(result.message);
+      setLoading(false);
+    }
   };
 
   return (
@@ -39,7 +44,7 @@ export function LoginScreen({ navigation }: Props) {
         <AppInput label="E-mail" value={login} onChangeText={(value) => { setLogin(value); setError(''); }} keyboardType="email-address" autoCapitalize="none" placeholder="voce@email.com" />
         <AppInput label="Senha" value={password} onChangeText={(value) => { setPassword(value); setError(''); }} secureTextEntry placeholder="Sua senha" />
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <AppButton title="Entrar" onPress={submit} />
+        <AppButton title="Entrar" onPress={submit} loading={loading} />
         <Text style={styles.demo}>Quer entrar rapidinho? Use tutor@petfacil.com com a senha pet123.</Text>
       </View>
       <View style={styles.signUpRow}>

@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { AppProvider, useApp } from './src/contexts/AppContext';
 import { CartScreen } from './src/screens/CartScreen';
+import { HistoryScreen } from './src/screens/HistoryScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderSuccessScreen } from './src/screens/OrderSuccessScreen';
 import { ProductDetailScreen } from './src/screens/ProductDetailScreen';
@@ -31,6 +32,7 @@ function AppNavigator() {
             <Stack.Screen name="Products" component={ProductsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: 'Detalhes' }} />
             <Stack.Screen name="Cart" component={CartScreen} options={{ title: 'Meu carrinho' }} />
+            <Stack.Screen name="History" component={HistoryScreen} options={{ title: 'Meus pedidos' }} />
             <Stack.Screen name="OrderSuccess" component={OrderSuccessScreen} options={{ headerShown: false, gestureEnabled: false }} />
           </>
         ) : (

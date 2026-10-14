@@ -5,7 +5,7 @@ API em **Node.js + Express** com banco **MongoDB** (Mongoose), para o app React 
 ## Como rodar
 
 ```bash
-cd backend
+cd petfacil-backend/backend
 npm install
 cp .env.example .env     # ajuste MONGODB_URI e JWT_SECRET
 npm run seed             # cria os 5 produtos e o usuário demo
@@ -59,8 +59,8 @@ curl -X POST localhost:3000/api/orders -H 'Content-Type: application/json' \
 
 ## Conectando o app
 
-No app, troque o `AppContext` (hoje em memória) por chamadas `fetch` para esta API.
-No emulador Android use `http://10.0.2.2:3000`; em celular físico, o IP da máquina na rede (ex.: `http://192.168.0.10:3000`).
+O app já consome esta API (veja `src/services/` na raiz do projeto).
+No emulador Android ele usa `http://10.0.2.2:3000`; em celular físico, defina `EXPO_PUBLIC_API_URL` com o IP da máquina (ex.: `http://192.168.0.10:3000`).
 
 ## Testes
 
