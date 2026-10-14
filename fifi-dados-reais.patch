@@ -1,0 +1,570 @@
+diff --git a/petfacil-backend/backend/README.md b/petfacil-backend/backend/README.md
+index 65b03ec..cc37ed8 100644
+--- a/petfacil-backend/backend/README.md
++++ b/petfacil-backend/backend/README.md
+@@ -29,7 +29,7 @@ Usuário demo (igual ao do app): `tutor@petfacil.com` / `pet123`
+ | POST | `/api/orders` | Bearer | "Finalizar pedido" |
+ | GET | `/api/orders` | Bearer | Histórico de compras |
+ | GET | `/api/orders/:id` | Bearer | Detalhe de um pedido |
+-| POST | `/api/assistant` | – | Assistente Fifi |
++| POST | `/api/assistant` | Opcional (Bearer) | Assistente Fifi: responde com produtos e pedidos reais do banco |
+ 
+ ### Exemplos
+ 
+@@ -57,6 +57,21 @@ curl -X POST localhost:3000/api/orders -H 'Content-Type: application/json' \
+ - O preço do pedido é sempre o **preço promocional** lido do banco, nunca enviado pelo cliente.
+ - Pagamento no caixa, na retirada (sem gateway de pagamento).
+ 
++## Assistente Fifi
++
++A Fifi não tem respostas escritas à mão: a cada pergunta a API consulta o MongoDB e monta a resposta.
++
++| Pergunta de exemplo | O que é lido no banco |
++|---|---|
++| "Produtos em promoção" | `products` (desconto = preço atual × promocional) |
++| "Quanto custa o shampoo?" / "Validade do arranhador" | `products` (nome, tipo, descrição, preços, validade) |
++| "Qual o mais barato?" / "Ração mais cara" | `products` |
++| "Quais produtos vocês têm?" | `products`, agrupados por tipo |
++| "Qual o status do meu último pedido?" | `orders` do usuário logado (exige o token; sem ele a Fifi pede para entrar) |
++
++Perguntas de uso do app ("Como finalizar?", "Como remover do carrinho?") continuam com instruções fixas, pois não dependem de dados.
++A lógica fica em `src/services/assistant.js` (sem acesso a banco, fácil de testar) e a rota em `src/routes/assistant.js`.
++
+ ## Conectando o app
+ 
+ O app já consome esta API (veja `src/services/` na raiz do projeto).
+diff --git a/petfacil-backend/backend/src/middleware/auth.js b/petfacil-backend/backend/src/middleware/auth.js
+index bfb7dc1..f9426a7 100644
+--- a/petfacil-backend/backend/src/middleware/auth.js
++++ b/petfacil-backend/backend/src/middleware/auth.js
+@@ -23,4 +23,23 @@ async function requireAuth(req, res, next) {
+   }
+ }
+ 
+-module.exports = { requireAuth };
++/**
++ * Igual ao requireAuth, mas não bloqueia: se não houver token (ou ele for
++ * inválido/expirado) a requisição segue sem `req.user`. Usado em rotas públicas
++ * que ficam mais completas para quem está logado, como a assistente Fifi.
++ */
++async function optionalAuth(req, _res, next) {
++  try {
++    const [scheme, token] = (req.headers.authorization || '').split(' ');
++    if (scheme === 'Bearer' && token) {
++      const payload = jwt.verify(token, process.env.JWT_SECRET);
++      const user = await User.findById(payload.sub);
++      if (user) req.user = user;
++    }
++  } catch (error) {
++    if (error.name !== 'JsonWebTokenError' && error.name !== 'TokenExpiredError') return next(error);
++  }
++  next();
++}
++
++module.exports = { requireAuth, optionalAuth };
+diff --git a/petfacil-backend/backend/src/routes/assistant.js b/petfacil-backend/backend/src/routes/assistant.js
+index fbf1d6b..d032253 100644
+--- a/petfacil-backend/backend/src/routes/assistant.js
++++ b/petfacil-backend/backend/src/routes/assistant.js
+@@ -1,28 +1,29 @@
+ const express = require('express');
++const Product = require('../models/Product');
++const Order = require('../models/Order');
++const { optionalAuth } = require('../middleware/auth');
++const { answerQuestion, detectIntent, intentNeedsProducts } = require('../services/assistant');
+ 
+ const router = express.Router();
+ 
+-const answers = [
+-  { terms: ['filhote', 'filhotes', 'ração'], answer: 'Para filhotes, procure uma ração específica para a fase de crescimento. No catálogo, a Origem Filhotes é uma opção. Se houver restrição alimentar, confirme com o veterinário.' },
+-  { terms: ['promoção', 'promoções', 'oferta'], answer: 'Todos os itens do catálogo exibem o preço atual e o promocional. O valor em verde é o que entra no carrinho.' },
+-  { terms: ['finalizar', 'pedido', 'pagamento'], answer: 'Abra o carrinho, confira os itens e toque em “Finalizar pedido”. O pagamento será feito no caixa da loja quando você retirar a compra.' },
+-  { terms: ['remover', 'excluir', 'carrinho'], answer: 'No carrinho, toque no ícone de lixeira ao lado do item que deseja remover.' },
+-];
++router.post('/', optionalAuth, async (req, res, next) => {
++  try {
++    const { question } = req.body;
++    if (!question || !String(question).trim()) {
++      return res.status(400).json({ message: 'Envie uma pergunta.' });
++    }
+ 
+-const fallback = 'Posso ajudar com rações para filhotes, promoções, carrinho e finalização do pedido. Tente perguntar sobre um desses assuntos.';
++    // A Fifi só responde com o que está no banco: busca apenas o que a pergunta exige.
++    const intent = detectIntent(question);
++    const [products, orders] = await Promise.all([
++      intentNeedsProducts(intent) ? Product.find().sort({ name: 1 }).lean() : [],
++      intent === 'orders' && req.user ? Order.find({ user: req.user._id }).sort({ createdAt: -1 }).lean() : [],
++    ]);
+ 
+-function getAnswer(question) {
+-  const normalized = String(question).toLocaleLowerCase('pt-BR');
+-  return answers.find(({ terms }) => terms.some((term) => normalized.includes(term)))?.answer ?? fallback;
+-}
+-
+-router.post('/', (req, res) => {
+-  const { question } = req.body;
+-  if (!question || !String(question).trim()) {
+-    return res.status(400).json({ message: 'Envie uma pergunta.' });
++    res.json({ answer: answerQuestion({ question, products, orders, user: req.user ?? null }) });
++  } catch (error) {
++    next(error);
+   }
+-  res.json({ answer: getAnswer(question) });
+ });
+ 
+ module.exports = router;
+-module.exports.getAnswer = getAnswer;
+diff --git a/petfacil-backend/backend/src/services/assistant.js b/petfacil-backend/backend/src/services/assistant.js
+new file mode 100644
+index 0000000..4264fbb
+--- /dev/null
++++ b/petfacil-backend/backend/src/services/assistant.js
+@@ -0,0 +1,243 @@
++/**
++ * Lógica da Fifi, a assistente do PetFacil.
++ *
++ * Este módulo é "puro": não acessa o banco nem o Express. Quem chama (a rota)
++ * carrega produtos/pedidos reais do MongoDB e passa para `answerQuestion`.
++ * Assim, nenhuma resposta traz preço, produto ou pedido escrito à mão.
++ */
++
++const STATUS_HINTS = {
++  Registrado: 'Ele já foi registrado. O pagamento é feito no caixa da loja, na retirada.',
++  'Pronto para retirada': 'Já está pronto! Você pode retirar na loja e pagar no caixa.',
++  Retirado: 'Ele já foi retirado.',
++  Cancelado: 'Ele foi cancelado.',
++};
++
++const STOPWORDS = new Set([
++  'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na',
++  'nos', 'nas', 'e', 'ou', 'para', 'pra', 'com', 'sem', 'por', 'que', 'qual', 'quais', 'quanto',
++  'quanta', 'custa', 'custam', 'valor', 'valores', 'preco', 'precos', 'quero', 'queria', 'gostaria',
++  'tem', 'tenho', 'voce', 'voces', 'vc', 'me', 'mim', 'sobre', 'ha', 'existe', 'ter', 'ser', 'esta',
++  'estao', 'produto', 'produtos', 'item', 'itens', 'mostra', 'mostrar', 'mostre', 'ver', 'saber',
++  'informacao', 'informacoes', 'alguma', 'algum', 'algo', 'ajuda', 'ajudar', 'fala', 'falar', 'vende',
++  'vendem', 'pode', 'poderia', 'se', 'mais', 'menos', 'muito', 'oi', 'ola', 'fifi', 'eu', 'meu', 'minha',
++  'como', 'onde', 'quando', 'seu', 'sua', 'loja', 'aqui', 'hoje', 'agora', 'tipo',
++]);
++
++const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
++const money = (value) => BRL.format(value);
++
++/** minúsculas, sem acento e sem pontuação: "Promoção?" -> "promocao" */
++function normalize(text) {
++  return String(text ?? '')
++    .toLowerCase()
++    .normalize('NFD')
++    .replace(/[\u0300-\u036f]/g, '')
++    .replace(/[^a-z0-9\s]/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim();
++}
++
++/** "filhotes" e "filhote" viram o mesmo token */
++const stem = (token) => (token.length > 3 ? token.replace(/s$/, '') : token);
++
++function questionTokens(normalized) {
++  return normalized
++    .split(' ')
++    .filter((token) => token.length >= 3 && !STOPWORDS.has(token))
++    .map(stem);
++}
++
++const PATTERNS = {
++  greeting: /^(oi+|ola|opa|e ai|bom dia|boa tarde|boa noite|hey|hello)( fifi)?$/,
++  orderWord: /\b(pedidos?|compras?)\b/,
++  orderMine: /\b(meus?|minhas?|ultim[oa]s?|historico|status|acompanh\w*|pronto)\b/,
++  orderPast: /\b(historico|comprei)\b/,
++  checkout: /\b(finaliz\w*|fechar|concluir|pagar|pagamento)\b|\b(como|onde)\b.*\b(comprar|pedido)\b/,
++  cart: /\bcarrinho\b|\b(remover|remove|excluir|tirar|apagar)\b/,
++  cheapest: /\b(mais barat[oa]s?|menor preco|mais em conta|mais economic[oa]s?)\b/,
++  priciest: /\b(mais car[oa]s?|maior preco)\b/,
++  promo: /\b(promo\w*|oferta\w*|desconto\w*|barat\w*|economiz\w*)\b/,
++  expiry: /\b(validade|vence|vencimento|vencer|expira\w*)\b/,
++  catalog: /\b(categorias?|catalogo|o que (voces )?(tem|vende\w*)|quais produtos|todos os produtos|produtos)\b/,
++};
++
++/**
++ * Descobre o que a pessoa quer. A rota usa isso para decidir o que buscar no
++ * banco (pedidos só são carregados quando a pergunta é sobre pedidos).
++ */
++function detectIntent(question) {
++  const text = normalize(question);
++  if (PATTERNS.greeting.test(text)) return 'greeting';
++  if ((PATTERNS.orderWord.test(text) && PATTERNS.orderMine.test(text)) || PATTERNS.orderPast.test(text)) return 'orders';
++  if (PATTERNS.checkout.test(text)) return 'checkout';
++  if (PATTERNS.cart.test(text)) return 'cart';
++  if (PATTERNS.cheapest.test(text)) return 'cheapest';
++  if (PATTERNS.priciest.test(text)) return 'priciest';
++  if (PATTERNS.promo.test(text)) return 'promo';
++  return 'search';
++}
++
++/** Intenções que precisam do catálogo vindo do banco. */
++const intentNeedsProducts = (intent) => !['orders', 'checkout', 'cart'].includes(intent);
++
++/**
++ * Procura produtos cujo nome, tipo ou descrição combinem com a pergunta.
++ * Nome/tipo valem mais que descrição. Devolve só os melhores resultados.
++ */
++function searchProducts(question, products) {
++  const tokens = [...new Set(questionTokens(normalize(question)))];
++  if (!tokens.length) return [];
++
++  const scored = products
++    .map((product) => {
++      const strong = new Set(questionTokens(normalize(`${product.name} ${product.type}`)));
++      const weak = new Set(questionTokens(normalize(product.description)));
++      let matched = 0;
++      let score = 0;
++      for (const token of tokens) {
++        const weight = strong.has(token) ? 3 : weak.has(token) ? 1 : 0;
++        if (weight) matched += 1;
++        score += weight;
++      }
++      return { product, matched, score };
++    })
++    .filter(({ matched }) => matched > 0)
++    .sort((a, b) => b.matched - a.matched || b.score - a.score || a.product.name.localeCompare(b.product.name, 'pt-BR'));
++
++  if (!scored.length) return [];
++  // Quem casa com mais termos da pergunta vem primeiro; depois descarta os bem mais fracos.
++  const best = scored.filter(({ matched }) => matched === scored[0].matched);
++  return best.filter(({ score }) => score > best[0].score / 2).slice(0, 4).map(({ product }) => product);
++}
++
++const discountPercent = (product) =>
++  product.currentPrice > 0 ? Math.round(((product.currentPrice - product.promotionalPrice) / product.currentPrice) * 100) : 0;
++
++const hasPromotion = (product) => product.promotionalPrice < product.currentPrice;
++
++function priceText(product) {
++  if (!hasPromotion(product)) return money(product.promotionalPrice);
++  return `de ${money(product.currentPrice)} por ${money(product.promotionalPrice)} (${discountPercent(product)}% de desconto)`;
++}
++
++function describeProduct(product, { withExpiry }) {
++  const parts = [`${product.name}: ${priceText(product)}.`, product.description];
++  if (withExpiry) {
++    parts.push(
++      product.expirationDate && normalize(product.expirationDate) !== 'nao se aplica'
++        ? `Validade: ${product.expirationDate}.`
++        : 'Este produto não tem prazo de validade.'
++    );
++  }
++  return parts.join(' ');
++}
++
++function listLine(product) {
++  return hasPromotion(product)
++    ? `• ${product.name}: ${money(product.promotionalPrice)} (de ${money(product.currentPrice)})`
++    : `• ${product.name}: ${money(product.promotionalPrice)}`;
++}
++
++function answerProducts(question, products) {
++  const hits = searchProducts(question, products);
++  if (!hits.length) return null;
++  const withExpiry = PATTERNS.expiry.test(normalize(question));
++  if (hits.length === 1) return describeProduct(hits[0], { withExpiry });
++  return `Encontrei estes produtos:\n${hits.map(listLine).join('\n')}\nQuer detalhes de algum deles?`;
++}
++
++function answerPromotions(products) {
++  const onSale = products.filter(hasPromotion).sort((a, b) => discountPercent(b) - discountPercent(a));
++  if (!onSale.length) return 'No momento nenhum produto está com preço promocional.';
++  const lines = onSale.slice(0, 6).map((p) => `• ${p.name}: de ${money(p.currentPrice)} por ${money(p.promotionalPrice)} (${discountPercent(p)}% off)`);
++  return `Estas são as promoções do catálogo agora:\n${lines.join('\n')}\nO valor promocional é o que entra no carrinho.`;
++}
++
++function answerExtreme(question, products, kind) {
++  const scoped = searchProducts(question, products);
++  const pool = scoped.length ? scoped : products;
++  if (!pool.length) return 'O catálogo está vazio no momento.';
++  const sorted = [...pool].sort((a, b) => a.promotionalPrice - b.promotionalPrice);
++  const product = kind === 'cheapest' ? sorted[0] : sorted[sorted.length - 1];
++  const label = kind === 'cheapest' ? 'mais barato' : 'mais caro';
++  const scope = scoped.length ? 'entre os que encontrei' : 'do catálogo';
++  return `O produto ${label} ${scope} é ${product.name}, por ${money(product.promotionalPrice)}.`;
++}
++
++function answerCatalog(products) {
++  if (!products.length) return 'O catálogo está vazio no momento.';
++  const byType = new Map();
++  for (const product of products) byType.set(product.type, [...(byType.get(product.type) ?? []), product.name]);
++  const lines = [...byType].map(([type, names]) => `• ${type}: ${names.join(', ')}`);
++  return `Hoje temos ${products.length} produtos no catálogo:\n${lines.join('\n')}`;
++}
++
++function answerFallback(products) {
++  if (!products.length) return 'O catálogo está vazio no momento, então ainda não consigo ajudar com produtos.';
++  const types = [...new Set(products.map((p) => p.type))].join(', ');
++  const example = products[0].name;
++  return `Não encontrei isso no catálogo. Posso ajudar com preços, promoções, validade, categorias (${types}) e com os seus pedidos. Por exemplo: “quanto custa ${example}?”`;
++}
++
++function formatDateTime(value) {
++  const date = new Date(value);
++  if (Number.isNaN(date.getTime())) return '';
++  const day = date.toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });
++  const time = date.toLocaleTimeString('pt-BR', { timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit' });
++  return `${day} às ${time}`;
++}
++
++function answerOrders(orders, user) {
++  if (!user) return 'Para consultar seus pedidos, entre na sua conta.';
++  if (!orders.length) return 'Você ainda não fez nenhum pedido. Quando finalizar um, ele aparece aqui.';
++
++  const [latest] = [...orders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
++  const grouped = new Map();
++  for (const item of latest.items) grouped.set(item.productName, (grouped.get(item.productName) ?? 0) + 1);
++  const items = [...grouped].map(([name, quantity]) => `${quantity}× ${name}`).join(', ');
++  const plural = latest.itemCount === 1 ? 'item' : 'itens';
++
++  const lines = [
++    `Seu último pedido foi em ${formatDateTime(latest.createdAt)}: ${latest.itemCount} ${plural}, total de ${money(latest.total)}.`,
++    `Itens: ${items}.`,
++    `Status: ${latest.status}. ${STATUS_HINTS[latest.status] ?? ''}`.trim(),
++  ];
++  if (orders.length > 1) lines.push(`Você tem ${orders.length} pedidos no histórico.`);
++  return lines.join('\n');
++}
++
++/**
++ * @param {object} input
++ * @param {string} input.question
++ * @param {Array}  input.products  produtos reais do banco
++ * @param {Array}  input.orders    pedidos reais do usuário logado ([] se não logado)
++ * @param {object|null} input.user usuário logado, se houver
++ */
++function answerQuestion({ question, products = [], orders = [], user = null }) {
++  switch (detectIntent(question)) {
++    case 'greeting': {
++      const firstName = user?.fullName?.trim().split(/\s+/)[0];
++      return `Oi${firstName ? `, ${firstName}` : ''}! Sou a Fifi. Posso falar de produtos, preços, promoções e dos seus pedidos.`;
++    }
++    case 'orders':
++      return answerOrders(orders, user);
++    case 'checkout':
++      return 'Abra o carrinho, confira os itens e toque em “Finalizar pedido”. O pagamento é feito no caixa da loja quando você retirar a compra.';
++    case 'cart':
++      return 'No carrinho, toque no ícone de lixeira ao lado do item que deseja remover.';
++    case 'cheapest':
++      return answerExtreme(question, products, 'cheapest');
++    case 'priciest':
++      return answerExtreme(question, products, 'priciest');
++    case 'promo':
++      return answerPromotions(products);
++    default: {
++      const found = answerProducts(question, products);
++      if (found) return found;
++      return PATTERNS.catalog.test(normalize(question)) ? answerCatalog(products) : answerFallback(products);
++    }
++  }
++}
++
++module.exports = { answerQuestion, detectIntent, intentNeedsProducts, searchProducts, normalize };
+diff --git a/petfacil-backend/backend/tests/assistant.test.js b/petfacil-backend/backend/tests/assistant.test.js
+new file mode 100644
+index 0000000..c2c4c18
+--- /dev/null
++++ b/petfacil-backend/backend/tests/assistant.test.js
+@@ -0,0 +1,104 @@
++const assert = require('node:assert/strict');
++const test = require('node:test');
++const { answerQuestion, detectIntent, intentNeedsProducts } = require('../src/services/assistant');
++
++// Catálogo DIFERENTE do seed, de propósito: prova que a Fifi usa o que vem do banco.
++const products = [
++  { name: 'Ração Sênior Premium', currentPrice: 100, promotionalPrice: 80, type: 'Ração', description: 'Ração para cães idosos com glucosamina.', expirationDate: '10/10/2028' },
++  { name: 'Ração Gatinhos Mix', currentPrice: 50, promotionalPrice: 50, type: 'Ração', description: 'Alimento completo para gatos filhotes.', expirationDate: '01/05/2027' },
++  { name: 'Corda Dental', currentPrice: 20, promotionalPrice: 15, type: 'Brinquedo', description: 'Corda resistente para cães.', expirationDate: 'Não se aplica' },
++];
++const ask = (question, extra = {}) => answerQuestion({ question, products, ...extra });
++
++test('preço vem do produto do banco, não de texto fixo', () => {
++  const answer = ask('Quanto custa a Corda Dental?');
++  assert.match(answer, /Corda Dental/);
++  assert.match(answer, /R\$\s?15,00/);
++  assert.match(answer, /R\$\s?20,00/);
++  assert.match(answer, /25% de desconto/);
++});
++
++test('mesma pergunta, outro banco: resposta muda', () => {
++  const other = [{ ...products[2], promotionalPrice: 10 }];
++  assert.match(answerQuestion({ question: 'Corda Dental', products: other }), /R\$\s?10,00/);
++});
++
++test('encontra por categoria e por plural/singular (filhote x filhotes)', () => {
++  assert.match(ask('ração para filhotes'), /Gatinhos Mix/);
++  assert.doesNotMatch(ask('ração para filhotes'), /Sênior/);
++});
++
++test('promoções listam só quem está em promoção, do maior desconto ao menor', () => {
++  const answer = ask('Produtos em promoção');
++  assert.match(answer, /Sênior Premium/);
++  assert.match(answer, /Corda Dental/);
++  assert.doesNotMatch(answer, /Gatinhos Mix/);
++  assert.ok(answer.indexOf('Corda Dental') < answer.indexOf('Sênior Premium'));
++});
++
++test('sem nenhuma promoção, avisa em vez de inventar', () => {
++  const noSale = products.map((p) => ({ ...p, promotionalPrice: p.currentPrice }));
++  assert.match(answerQuestion({ question: 'tem promoção?', products: noSale }), /nenhum produto está com preço promocional/);
++});
++
++test('mais barato e mais caro, inclusive dentro de uma categoria', () => {
++  assert.match(ask('qual o mais barato?'), /Corda Dental/);
++  assert.match(ask('qual o mais caro?'), /Sênior Premium/);
++  assert.match(ask('ração mais barata'), /Gatinhos Mix/);
++});
++
++test('validade só aparece quando perguntam, e trata "Não se aplica"', () => {
++  assert.match(ask('qual a validade da Ração Sênior Premium?'), /10\/10\/2028/);
++  assert.match(ask('validade da Corda Dental'), /não tem prazo de validade/);
++  assert.doesNotMatch(ask('Ração Sênior Premium'), /Validade/);
++});
++
++test('catálogo e fallback usam categorias e produto reais', () => {
++  assert.match(ask('quais produtos vocês têm?'), /Ração: Ração Sênior Premium, Ração Gatinhos Mix/);
++  const fallback = ask('xyz qwerty');
++  assert.match(fallback, /Ração, Brinquedo/);
++  assert.match(fallback, /Ração Sênior Premium/);
++});
++
++test('catálogo vazio não inventa produtos', () => {
++  assert.match(answerQuestion({ question: 'promoção', products: [] }), /nenhum produto/);
++  assert.match(answerQuestion({ question: 'xyz', products: [] }), /catálogo está vazio/);
++});
++
++const user = { fullName: 'Maria Silva' };
++const orders = [
++  { createdAt: '2026-10-01T12:00:00Z', itemCount: 1, total: 15, status: 'Retirado', items: [{ productName: 'Corda Dental' }] },
++  { createdAt: '2026-10-10T15:30:00Z', itemCount: 3, total: 175, status: 'Pronto para retirada', items: [{ productName: 'Corda Dental' }, { productName: 'Corda Dental' }, { productName: 'Ração Sênior Premium' }] },
++];
++
++test('último pedido vem do banco: itens agrupados, total, status e contagem', () => {
++  const answer = ask('qual o status do meu último pedido?', { orders, user });
++  assert.match(answer, /10\/10\/2026/);
++  assert.match(answer, /3 itens/);
++  assert.match(answer, /R\$\s?175,00/);
++  assert.match(answer, /2× Corda Dental, 1× Ração Sênior Premium/);
++  assert.match(answer, /Pronto para retirada/);
++  assert.match(answer, /2 pedidos no histórico/);
++});
++
++test('pedidos: sem login pede para entrar; sem pedidos avisa', () => {
++  assert.match(ask('meus pedidos', { user: null }), /entre na sua conta/);
++  assert.match(ask('meus pedidos', { orders: [], user }), /ainda não fez nenhum pedido/);
++});
++
++test('“como finalizar o pedido?” continua sendo ajuda de uso, não consulta de pedidos', () => {
++  assert.equal(detectIntent('Como finalizar?'), 'checkout');
++  assert.equal(detectIntent('como faço um pedido'), 'checkout');
++  assert.equal(detectIntent('meu pedido já está pronto?'), 'orders');
++  assert.equal(detectIntent('como remover do carrinho'), 'cart');
++});
++
++test('saudação usa o nome do usuário logado', () => {
++  assert.match(ask('oi', { user }), /Oi, Maria!/);
++  assert.match(ask('Olá!'), /^Oi!/);
++});
++
++test('a rota só busca produtos quando a pergunta precisa deles', () => {
++  assert.equal(intentNeedsProducts(detectIntent('meus pedidos')), false);
++  assert.equal(intentNeedsProducts(detectIntent('promoções')), true);
++});
+diff --git a/petfacil-backend/backend/tests/validators.test.js b/petfacil-backend/backend/tests/validators.test.js
+index 741d8c3..350b321 100644
+--- a/petfacil-backend/backend/tests/validators.test.js
++++ b/petfacil-backend/backend/tests/validators.test.js
+@@ -1,7 +1,6 @@
+ const assert = require('node:assert/strict');
+ const test = require('node:test');
+ const { isValidCpf, validateSignUp } = require('../src/utils/validators');
+-const { getAnswer } = require('../src/routes/assistant');
+ 
+ test('aceita CPF com dígitos verificadores válidos', () => {
+   assert.equal(isValidCpf('529.982.247-25'), true);
+@@ -21,8 +20,3 @@ test('cadastro válido não gera erros', () => {
+   const errors = validateSignUp({ fullName: 'Maria Silva', email: 'maria@email.com', cpf: '529.982.247-25', password: 'abc123', passwordConfirmation: 'abc123' });
+   assert.deepEqual(errors, {});
+ });
+-
+-test('assistente responde por palavra-chave e tem resposta padrão', () => {
+-  assert.match(getAnswer('Quero ração para filhotes'), /Origem Filhotes/);
+-  assert.match(getAnswer('xyz'), /Posso ajudar/);
+-});
+diff --git a/src/components/Assistant.tsx b/src/components/Assistant.tsx
+index 33b59db..d0ca332 100644
+--- a/src/components/Assistant.tsx
++++ b/src/components/Assistant.tsx
+@@ -6,18 +6,8 @@ import { colors, fonts, radius, shadow } from '../theme';
+ 
+ type Message = { from: 'bot' | 'user'; text: string };
+ 
+-const answers = [
+-  { terms: ['filhote', 'filhotes', 'ração'], answer: 'Para filhotes, procure uma ração específica para a fase de crescimento. No catálogo, a Origem Filhotes é uma opção. Se houver restrição alimentar, confirme com o veterinário.' },
+-  { terms: ['promoção', 'promoções', 'oferta'], answer: 'Todos os itens do catálogo exibem o preço atual e o promocional. O valor em verde é o que entra no carrinho.' },
+-  { terms: ['finalizar', 'pedido', 'pagamento'], answer: 'Abra o carrinho, confira os itens e toque em “Finalizar pedido”. O pagamento será feito no caixa da loja quando você retirar a compra.' },
+-  { terms: ['remover', 'excluir', 'carrinho'], answer: 'No carrinho, toque no ícone de lixeira ao lado do item que deseja remover.' },
+-];
+-
+-function getAnswer(question: string) {
+-  const normalized = question.toLocaleLowerCase('pt-BR');
+-  return answers.find(({ terms }) => terms.some((term) => normalized.includes(term)))?.answer
+-    ?? 'Posso ajudar com rações para filhotes, promoções, carrinho e finalização do pedido. Tente perguntar sobre um desses assuntos.';
+-}
++const SUGGESTIONS = ['Produtos em promoção', 'Meu último pedido', 'Ração para filhotes', 'Como finalizar?'];
++const UNAVAILABLE = 'Não consegui consultar o catálogo agora. Verifique sua conexão e tente de novo em instantes.';
+ 
+ export function Assistant() {
+   const [visible, setVisible] = useState(false);
+@@ -26,16 +16,22 @@ export function Assistant() {
+     { from: 'bot', text: 'Oi! Sou a Fifi. O que você quer saber sobre os produtos ou seu pedido?' },
+   ]);
+ 
++  const [busy, setBusy] = useState(false);
++
+   const send = async (text = input) => {
+     const question = text.trim();
+-    if (!question) return;
++    if (!question || busy) return;
+     setMessages((current) => [...current, { from: 'user', text: question }]);
+     setInput('');
++    setBusy(true);
+     let answer: string;
+     try {
++      // A resposta vem da API, que consulta produtos e pedidos reais no banco.
+       answer = await api.ask(question);
+     } catch {
+-      answer = getAnswer(question);
++      answer = UNAVAILABLE;
++    } finally {
++      setBusy(false);
+     }
+     setMessages((current) => [...current, { from: 'bot', text: answer }]);
+   };
+@@ -64,15 +60,20 @@ export function Assistant() {
+                   <Text style={[styles.message, message.from === 'user' && styles.userMessage]}>{message.text}</Text>
+                 </View>
+               ))}
++              {busy && (
++                <View style={[styles.bubble, styles.botBubble]}>
++                  <Text style={[styles.message, { color: colors.muted }]}>Fifi está consultando…</Text>
++                </View>
++              )}
+             </ScrollView>
+             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestions}>
+-              {['Ração para filhotes', 'Produtos em promoção', 'Como finalizar?'].map((suggestion) => (
+-                <Pressable key={suggestion} onPress={() => send(suggestion)} style={styles.chip}><Text style={styles.chipText}>{suggestion}</Text></Pressable>
++              {SUGGESTIONS.map((suggestion) => (
++                <Pressable key={suggestion} disabled={busy} onPress={() => send(suggestion)} style={styles.chip}><Text style={styles.chipText}>{suggestion}</Text></Pressable>
+               ))}
+             </ScrollView>
+             <View style={styles.composer}>
+               <TextInput value={input} onChangeText={setInput} onSubmitEditing={() => send()} placeholder="Digite sua dúvida" placeholderTextColor={colors.muted} style={styles.input} />
+-              <Pressable accessibilityLabel="Enviar pergunta" onPress={() => send()} style={styles.send}><Ionicons name="arrow-up" size={22} color={colors.white} /></Pressable>
++              <Pressable accessibilityLabel="Enviar pergunta" disabled={busy} onPress={() => send()} style={[styles.send, busy && { opacity: 0.5 }]}><Ionicons name="arrow-up" size={22} color={colors.white} /></Pressable>
+             </View>
+           </View>
+         </View>

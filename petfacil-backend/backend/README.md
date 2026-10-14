@@ -29,7 +29,7 @@ Usuário demo (igual ao do app): `tutor@petfacil.com` / `pet123`
 | POST | `/api/orders` | Bearer | "Finalizar pedido" |
 | GET | `/api/orders` | Bearer | Histórico de compras |
 | GET | `/api/orders/:id` | Bearer | Detalhe de um pedido |
-| POST | `/api/assistant` | – | Assistente Fifi |
+| POST | `/api/assistant` | Opcional (Bearer) | Assistente Fifi: responde com produtos e pedidos reais do banco |
 
 ### Exemplos
 
@@ -56,6 +56,21 @@ curl -X POST localhost:3000/api/orders -H 'Content-Type: application/json' \
 - Senhas são criptografadas com bcrypt; a sessão usa JWT (`Authorization: Bearer <token>`).
 - O preço do pedido é sempre o **preço promocional** lido do banco, nunca enviado pelo cliente.
 - Pagamento no caixa, na retirada (sem gateway de pagamento).
+
+## Assistente Fifi
+
+A Fifi não tem respostas escritas à mão: a cada pergunta a API consulta o MongoDB e monta a resposta.
+
+| Pergunta de exemplo | O que é lido no banco |
+|---|---|
+| "Produtos em promoção" | `products` (desconto = preço atual × promocional) |
+| "Quanto custa o shampoo?" / "Validade do arranhador" | `products` (nome, tipo, descrição, preços, validade) |
+| "Qual o mais barato?" / "Ração mais cara" | `products` |
+| "Quais produtos vocês têm?" | `products`, agrupados por tipo |
+| "Qual o status do meu último pedido?" | `orders` do usuário logado (exige o token; sem ele a Fifi pede para entrar) |
+
+Perguntas de uso do app ("Como finalizar?", "Como remover do carrinho?") continuam com instruções fixas, pois não dependem de dados.
+A lógica fica em `src/services/assistant.js` (sem acesso a banco, fácil de testar) e a rota em `src/routes/assistant.js`.
 
 ## Conectando o app
 

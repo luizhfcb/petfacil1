@@ -6,18 +6,8 @@ import { colors, fonts, radius, shadow } from '../theme';
 
 type Message = { from: 'bot' | 'user'; text: string };
 
-const answers = [
-  { terms: ['filhote', 'filhotes', 'ração'], answer: 'Para filhotes, procure uma ração específica para a fase de crescimento. No catálogo, a Origem Filhotes é uma opção. Se houver restrição alimentar, confirme com o veterinário.' },
-  { terms: ['promoção', 'promoções', 'oferta'], answer: 'Todos os itens do catálogo exibem o preço atual e o promocional. O valor em verde é o que entra no carrinho.' },
-  { terms: ['finalizar', 'pedido', 'pagamento'], answer: 'Abra o carrinho, confira os itens e toque em “Finalizar pedido”. O pagamento será feito no caixa da loja quando você retirar a compra.' },
-  { terms: ['remover', 'excluir', 'carrinho'], answer: 'No carrinho, toque no ícone de lixeira ao lado do item que deseja remover.' },
-];
-
-function getAnswer(question: string) {
-  const normalized = question.toLocaleLowerCase('pt-BR');
-  return answers.find(({ terms }) => terms.some((term) => normalized.includes(term)))?.answer
-    ?? 'Posso ajudar com rações para filhotes, promoções, carrinho e finalização do pedido. Tente perguntar sobre um desses assuntos.';
-}
+const SUGGESTIONS = ['Produtos em promoção', 'Meu último pedido', 'Ração para filhotes', 'Como finalizar?'];
+const UNAVAILABLE = 'Não consegui consultar o catálogo agora. Verifique sua conexão e tente de novo em instantes.';
 
 export function Assistant() {
   const [visible, setVisible] = useState(false);
@@ -26,16 +16,22 @@ export function Assistant() {
     { from: 'bot', text: 'Oi! Sou a Fifi. O que você quer saber sobre os produtos ou seu pedido?' },
   ]);
 
+  const [busy, setBusy] = useState(false);
+
   const send = async (text = input) => {
     const question = text.trim();
-    if (!question) return;
+    if (!question || busy) return;
     setMessages((current) => [...current, { from: 'user', text: question }]);
     setInput('');
+    setBusy(true);
     let answer: string;
     try {
+      // A resposta vem da API, que consulta produtos e pedidos reais no banco.
       answer = await api.ask(question);
     } catch {
-      answer = getAnswer(question);
+      answer = UNAVAILABLE;
+    } finally {
+      setBusy(false);
     }
     setMessages((current) => [...current, { from: 'bot', text: answer }]);
   };
@@ -64,15 +60,20 @@ export function Assistant() {
                   <Text style={[styles.message, message.from === 'user' && styles.userMessage]}>{message.text}</Text>
                 </View>
               ))}
+              {busy && (
+                <View style={[styles.bubble, styles.botBubble]}>
+                  <Text style={[styles.message, { color: colors.muted }]}>Fifi está consultando…</Text>
+                </View>
+              )}
             </ScrollView>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestions}>
-              {['Ração para filhotes', 'Produtos em promoção', 'Como finalizar?'].map((suggestion) => (
-                <Pressable key={suggestion} onPress={() => send(suggestion)} style={styles.chip}><Text style={styles.chipText}>{suggestion}</Text></Pressable>
+              {SUGGESTIONS.map((suggestion) => (
+                <Pressable key={suggestion} disabled={busy} onPress={() => send(suggestion)} style={styles.chip}><Text style={styles.chipText}>{suggestion}</Text></Pressable>
               ))}
             </ScrollView>
             <View style={styles.composer}>
               <TextInput value={input} onChangeText={setInput} onSubmitEditing={() => send()} placeholder="Digite sua dúvida" placeholderTextColor={colors.muted} style={styles.input} />
-              <Pressable accessibilityLabel="Enviar pergunta" onPress={() => send()} style={styles.send}><Ionicons name="arrow-up" size={22} color={colors.white} /></Pressable>
+              <Pressable accessibilityLabel="Enviar pergunta" disabled={busy} onPress={() => send()} style={[styles.send, busy && { opacity: 0.5 }]}><Ionicons name="arrow-up" size={22} color={colors.white} /></Pressable>
             </View>
           </View>
         </View>
